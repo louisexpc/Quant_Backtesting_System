@@ -1,0 +1,14 @@
+{
+    "stoch_rsi":{
+        "symbol":["BTCUSD","ETHUSD","BNBUSD"],
+        "timeframe":"15m",
+        "limit":100,
+        "param":{
+            "stoch_period":14,
+            "ema_period":3,
+            "macd_short_period":5,
+            "macd_long_period":35,
+            "macd_signal_period":5
+        }
+    }
+}
