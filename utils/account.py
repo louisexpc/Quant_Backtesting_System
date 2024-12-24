@@ -1,6 +1,4 @@
-import numpy as np
-import pandas as pd
-
+from utils.order import order_history
 class Account(object):
     _instances = {}  
 
@@ -24,12 +22,11 @@ class Account(object):
         '''
         交易資訊:
         commission: 交易手續費
-        orders_book: all order information writing in main.py
-        position: False: 未持有頭寸 True:持有頭寸
+        history: order_history 物件，紀錄訂單/持倉
         '''
         self.commission = 0
-        self.orders_book=[]
-        self.position = False # False: 未持有頭寸 True:持有頭寸
+        self.history=order_history()
+        
 
     def set_asset(self, cash):
         self.asset = cash
@@ -40,15 +37,6 @@ class Account(object):
     def set_commission(self, commission):
         self.commission = commission
 
-    def have_position(self):
-        for order in self.orders_book:
-            if not order['status']:
-                self.position = True
-                return True
-        self.position = False
-        return False
+    
 
     
-class order(object):
-    def __init__(self) -> None:
-        pass
