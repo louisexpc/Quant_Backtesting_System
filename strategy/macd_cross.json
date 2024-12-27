@@ -1,0 +1,13 @@
+{
+    "macd_cross":{
+        "symbol":["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"],
+        "timeframe":"15m",
+        "limit":79,
+        "param":{
+            "ema_period":14,
+            "macd_short_period":12,
+            "macd_long_period":26,
+            "macd_signal_period":9
+        }
+    }
+}

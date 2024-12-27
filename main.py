@@ -5,21 +5,31 @@ from utils.order import order_history,order
 from utils.evalution import roi,maximum_drawdown
 from pkg.ConfigLoader import config
 from strategy.stoch_rsi import StochRSI
+from strategy.macd_cross import macd_cross
 
-STRATEGY_CONFIG = ".\\strategy\\stoch_rsi.json"
-STRATEGY_NAME = "stoch_rsi"
+#STRATEGY_CONFIG = ".\\strategy\\stoch_rsi.json"
+#STRATEGY_NAME = "stoch_rsi"
+STRATEGY_CONFIG = r".\strategy\macd_cross.json"
+STRATEGY_NAME = "macd_cross"
 class backtest(object):
     def __init__(self,account_id:int,data_list:list,symbols:list):
         self.data_list = data_list
         self.symbols = symbols
         self.orginal_data = self.trans_original_data()
+
         self.account =Account(account_id)
         self.history = self.account.history
         self.current_index = 0
         self.risk_management = 0.05 #基於1%原則，每一position 的失效點(unit:%)
-        """ Init Strategy """
+        """ Init Sotch RSI Strategy """
+        """
         self.config = config(STRATEGY_CONFIG).load_config()[STRATEGY_NAME]
         self.timeframe = self.config['timeframe']
+        self.limit = self.config['limit']
+        self.param = self.config['param']
+        """
+        """ Init MACD Cross Strategy """
+        self.config = config(STRATEGY_CONFIG).load_config()[STRATEGY_NAME]
         self.limit = self.config['limit']
         self.param = self.config['param']
 
@@ -28,6 +38,7 @@ class backtest(object):
         for i in range(len(self.data_list)):
             original_data[self.symbols[i]]=pd.read_csv(self.data_list[i])
         return original_data
+    
     def data_segment(self)->dict:
         i = self.current_index
         segment_data = {}
@@ -44,10 +55,11 @@ class backtest(object):
     def next(self):
         i = self.current_index
         
-        if i>=1:
+        if i>=self.limit:
             current_data = self.data_segment()
-            signals = StochRSI(current_data).run()
-            #print(signals)
+            #signals = StochRSI(current_data).run()
+            signals = macd_cross(current_data).run()
+            #print(f"{i}:{signals}")
             for index in range(len(signals)):
                 if signals[self.symbols[index]]==1:
                     self.buy(self.symbols[index])
@@ -154,10 +166,12 @@ class backtest(object):
             
 
 if __name__=='__main__':
-    timeframe = '15m'
-    ROOT = '.\\data\\'
-    data_list =[ROOT+f"{timeframe}_BTC-USD.csv",ROOT+f"{timeframe}_ETH-USD.csv",ROOT+f"{timeframe}_BNB-USD.csv",ROOT+f"{timeframe}_SOL-USD.csv",ROOT+f"{timeframe}_XRP-USD.csv"]
-    symbols = ["BTCUSD","ETHUSD","BNBUSD","SOLUSD","XRPUSD"]
+    timeframe = '1d'
+    data_list=[]
+    symbols = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"]
+    for symbol in symbols:
+        data_list.append(rf".\data\{timeframe}_{symbol}.csv")
+ 
     trader = backtest(0,data_list,symbols)
     trader.account.set_asset(1000)
     trader.account.set_commission(0.001)

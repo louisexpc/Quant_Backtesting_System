@@ -179,6 +179,10 @@ class MACD(object):
         return self.signal
     def get_histogram(self):
         return self.macd-self.signal
+    def get_long_ema(self):
+        return self.long_ema
+    def get_short_ema(self):
+        return self.short_ema
 if __name__=='__main__':
     # 載入資料
     data = pd.read_csv("btc_usd_20231013_20241113.csv")

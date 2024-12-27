@@ -98,8 +98,7 @@
 ### `main.py` 主流程
 
 ```python
-python
-複製程式碼
+
 if __name__ == '__main__':
     # 配置參數
     timeframe = '15m'
