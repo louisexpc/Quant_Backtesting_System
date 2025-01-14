@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
 from scipy.stats import linregress
 
-class SmoothMovingAverage(object):
+class SmoothMovingAverage:
     """
     A class to compute the simple moving average (SMA) of a given symbol in a pandas DataFrame.
 
@@ -21,26 +21,44 @@ class SmoothMovingAverage(object):
             raise ValueError(f"Symbol '{symbol}' not found in DataFrame columns.")
         if not isinstance(window, int) or window <= 0:
             raise ValueError("Window size must be a positive integer.")
+        if data.empty:
+            raise ValueError("Input data must not be empty.")
+        if not pd.api.types.is_numeric_dtype(data[symbol]):
+            raise ValueError(f"Column '{symbol}' must contain numeric data.")
 
         self.data = data
         self.symbol = symbol
         self.window = window
-        self.sma = data[symbol].rolling(window=window).mean()
+
+        # 計算 SMA 並保證與原始資料對齊
+        self.sma = data[symbol].rolling(window=window).mean().reindex_like(data)
 
     def get_sma(self) -> pd.Series:
-        """Returns the computed Simple Moving Average (SMA) as a pandas Series."""
+        """Returns the computed simple moving average (SMA) as a pandas Series, aligned with the original data."""
         return self.sma
 
     def update_sma(self, new_data: pd.DataFrame):
-        """Updates the SMA with new data."""
+        """
+        Updates the SMA with new data.
+
+        Parameters:
+        new_data (pd.DataFrame): New input data containing price information.
+        """
         if not isinstance(new_data, pd.DataFrame):
             raise ValueError("New data must be a pandas DataFrame.")
         if self.symbol not in new_data.columns:
             raise ValueError(f"Symbol '{self.symbol}' not found in new data columns.")
-        self.sma = new_data[self.symbol].rolling(window=self.window).mean()
+        if new_data.empty:
+            raise ValueError("New data must not be empty.")
+        if not pd.api.types.is_numeric_dtype(new_data[self.symbol]):
+            raise ValueError(f"Column '{self.symbol}' in new data must contain numeric data.")
+
+        # 計算新的 SMA 並保證與新資料對齊
+        self.sma = new_data[self.symbol].rolling(window=self.window).mean().reindex_like(new_data)
+        self.data = new_data  # 更新內部資料
 
 
-class ExponentialMovingAverage(object):
+class ExponentialMovingAverage:
     """
     A class to compute the Exponential Moving Average (EMA) of a given symbol in a pandas DataFrame.
 
@@ -61,10 +79,12 @@ class ExponentialMovingAverage(object):
         self.data = data
         self.symbol = symbol
         self.window = window
-        self.ema = data[symbol].ewm(span=window, adjust=True, ignore_na=True).mean()
+
+        # 計算 EMA 並保證與原始 DataFrame 對齊
+        self.ema = data[symbol].ewm(span=window, adjust=True, ignore_na=True).mean().reindex_like(data)
 
     def get_ema(self) -> pd.Series:
-        """Returns the computed Exponential Moving Average (EMA) as a pandas Series."""
+        """Returns the computed Exponential Moving Average (EMA) as a pandas Series, aligned with the original data."""
         return self.ema
 
     def update_ema(self, new_data: pd.DataFrame):
@@ -73,59 +93,110 @@ class ExponentialMovingAverage(object):
             raise ValueError("New data must be a pandas DataFrame.")
         if self.symbol not in new_data.columns:
             raise ValueError(f"Symbol '{self.symbol}' not found in new data columns.")
-        self.ema = new_data[self.symbol].ewm(span=self.window, adjust=True, ignore_na=True).mean()
+        self.ema = new_data[self.symbol].ewm(span=self.window, adjust=True, ignore_na=True).mean().reindex_like(new_data)
+
 
     
 
-class RSI(object):
-    def __init__(self, data, symbol, short_period=14, long_period=20):
-     
+class RSI:
+    """
+    A class to compute the Relative Strength Index (RSI) for both short and long periods.
+
+    Parameters:
+    data (pd.DataFrame): Input data containing price information.
+    symbol (str): The column name representing the price to calculate RSI for.
+    short_period (int): The short period for calculating RSI (default: 14).
+    long_period (int): The long period for calculating RSI (default: 20).
+    """
+
+    def __init__(self, data: pd.DataFrame, symbol: str, short_period: int = 14, long_period: int = 20):
+        if not isinstance(data, pd.DataFrame):
+            raise ValueError("Input data must be a pandas DataFrame.")
+        if symbol not in data.columns:
+            raise ValueError(f"Symbol '{symbol}' not found in DataFrame columns.")
+        if not isinstance(short_period, int) or short_period <= 0:
+            raise ValueError("Short period must be a positive integer.")
+        if not isinstance(long_period, int) or long_period <= 0:
+            raise ValueError("Long period must be a positive integer.")
+
+        self.data = data
+        self.symbol = symbol
+        self.short_period = short_period
+        self.long_period = long_period
+
         # 計算每日變動百分比
         self.diff_pct = data[symbol].diff()
 
         # 計算長期 RSI
         self.long_average_gain = self.diff_pct.where(self.diff_pct > 0, 0).ewm(span=long_period, adjust=False).mean()
         self.long_average_loss = -self.diff_pct.where(self.diff_pct < 0, 0).ewm(span=long_period, adjust=False).mean()
-        
         self.longRS = self.long_average_gain / self.long_average_loss
         self.longRS = self.longRS.replace([np.inf, -np.inf], 0).fillna(0)
-        self.longRSI = 100 - (100 / (1 + self.longRS))
+        self.longRSI = (100 - (100 / (1 + self.longRS))).reindex_like(data)
 
         # 計算短期 RSI
         self.short_average_gain = self.diff_pct.where(self.diff_pct > 0, 0).ewm(span=short_period, adjust=False).mean()
         self.short_average_loss = -self.diff_pct.where(self.diff_pct < 0, 0).ewm(span=short_period, adjust=False).mean()
         self.shortRS = self.short_average_gain / self.short_average_loss
         self.shortRS = self.shortRS.replace([np.inf, -np.inf], 0).fillna(0)
-        self.shortRSI = 100 - (100 / (1 + self.shortRS))
-    
-    def get_long_rsi(self):
+        self.shortRSI = (100 - (100 / (1 + self.shortRS))).reindex_like(data)
+
+    def get_long_rsi(self) -> pd.Series:
+        """Returns the long period RSI as a pandas Series, aligned with the original data."""
         return self.longRSI
 
-    def get_short_rsi(self):
+    def get_short_rsi(self) -> pd.Series:
+        """Returns the short period RSI as a pandas Series, aligned with the original data."""
         return self.shortRSI
 '''
 Reference:https://academy.binance.com/zt/articles/stochastic-rsi-explained
 '''
-class StochasticRSI(object):
+class StochasticRSI:
+    """
+    A class to compute the Stochastic RSI (Relative Strength Index) of a given symbol in a pandas DataFrame.
 
-    def __init__(self, data, symbol, period=20):
-        self.rsi = RSI(data, symbol, period).get_short_rsi()
+    Parameters:
+    data (pd.DataFrame): Input data containing price information.
+    symbol (str): The column name representing the price to calculate RSI for.
+    period (int): The window size for calculating Stochastic RSI (default: 20).
+    """
+
+    def __init__(self, data: pd.DataFrame, symbol: str, period: int = 20):
+        if not isinstance(data, pd.DataFrame):
+            raise ValueError("Input data must be a pandas DataFrame.")
+        if symbol not in data.columns:
+            raise ValueError(f"Symbol '{symbol}' not found in DataFrame columns.")
+        if not isinstance(period, int) or period <= 0:
+            raise ValueError("Period must be a positive integer.")
+
+        self.data = data
+        self.symbol = symbol
         self.period = period
+
+        # 使用改進後的 RSI 類別來計算短期 RSI，已確保對齊原始資料
+        self.rsi = RSI(data, symbol).get_short_rsi()
+
+        # 計算 Stochastic RSI，並保證與原始資料對齊
         self.stochRSI = self.compute_stochastic_rsi()
 
-    def compute_stochastic_rsi(self):
-        # Calculate the minimum and maximum RSI values over the rolling period
+    def compute_stochastic_rsi(self) -> pd.Series:
+        """
+        Computes the Stochastic RSI based on the RSI values over the given rolling period.
+        Ensures that the output is aligned with the original data.
+        """
+        # 計算 RSI 的最小值與最大值
         lowest_rsi = self.rsi.rolling(window=self.period, min_periods=1).min()
         highest_rsi = self.rsi.rolling(window=self.period, min_periods=1).max()
-        # Calculate the Stochastic RSI
-        stoch_rsi = (self.rsi - lowest_rsi) / (highest_rsi - lowest_rsi)
-        
-        # Handle division by zero and fill NaN values appropriately
-        stoch_rsi = stoch_rsi.replace([np.inf, -np.inf], np.nan).fillna(0)
-        return stoch_rsi
 
-    def get_stochastic_rsi(self):
-        
+        # 計算 Stochastic RSI，處理可能的除零錯誤
+        stoch_rsi = (self.rsi - lowest_rsi) / (highest_rsi - lowest_rsi)
+        stoch_rsi = stoch_rsi.replace([np.inf, -np.inf], np.nan).fillna(0)
+
+        # 保證與原始資料對齊
+        return stoch_rsi.reindex_like(self.data)
+
+    def get_stochastic_rsi(self) -> pd.Series:
+        """Returns the computed Stochastic RSI as a pandas Series, aligned with the original data."""
         return self.stochRSI
 
 class OBV(object):
@@ -225,7 +296,7 @@ class KeltnerChannel(object):
         return self.ema20
 
 
-class MACD(object):
+class MACD:
     """
     A class to calculate the MACD (Moving Average Convergence Divergence) indicator.
 
@@ -259,42 +330,49 @@ class MACD(object):
         self.long_period = long_period
         self.sigal_period = sigal_period
 
+        # 計算 long EMA 與 short EMA，並保證與原始資料對齊
         self.long_ema = ExponentialMovingAverage(data, symbol, long_period).get_ema()
         self.short_ema = ExponentialMovingAverage(data, symbol, short_period).get_ema()
-        self.macd = self.short_ema - self.long_ema
+
+        # 計算 MACD 線，保證與原始資料對齊
+        self.macd = (self.short_ema - self.long_ema).reindex_like(self.data)
+
+        # 計算信號線，保證與原始資料對齊
         macd_df = pd.DataFrame({'MACD': self.macd})
         self.signal = ExponentialMovingAverage(macd_df, "MACD", sigal_period).get_ema()
 
     def get_macd_line(self) -> pd.Series:
-        """Returns the MACD line as a pandas Series."""
+        """Returns the MACD line as a pandas Series, aligned with the original data."""
         return self.macd
 
     def get_signal_line(self) -> pd.Series:
-        """Returns the signal line as a pandas Series."""
+        """Returns the signal line as a pandas Series, aligned with the original data."""
         return self.signal
 
     def get_histogram_line(self) -> pd.Series:
-        """Returns the MACD histogram (difference between MACD and signal line)."""
-        return self.macd - self.signal
+        """Returns the MACD histogram (difference between MACD and signal line), aligned with the original data."""
+        return (self.macd - self.signal).reindex_like(self.data)
 
     def get_long_ema(self) -> pd.Series:
-        """Returns the long EMA as a pandas Series."""
+        """Returns the long EMA as a pandas Series, aligned with the original data."""
         return self.long_ema
 
     def get_short_ema(self) -> pd.Series:
-        """Returns the short EMA as a pandas Series."""
+        """Returns the short EMA as a pandas Series, aligned with the original data."""
         return self.short_ema
 
-class AdaptiveEMA:
-    def __init__(self, data: pd.DataFrame, base_period: int, weights:dict=None):
-        '''
-        Calculate adaptive EMA period based on market characteristics.
 
-        Parameters:
-        data: pandas DataFrame with columns 'Close', 'Volume', 'High', 'Low'
-        base_period: integer starting EMA period to adjust
-        weights: dict, coefficients of combined_factor with keys 'volatility', 'volume', 'range', 'momentum'
-        '''
+class AdaptiveEMA:
+    """
+    A class to calculate an adaptive Exponential Moving Average (EMA) period based on market characteristics.
+
+    Parameters:
+    data (pd.DataFrame): Input data containing at least 'Close', 'Volume', 'High', and 'Low' columns.
+    base_period (int): Starting EMA period to adjust.
+    weights (dict): Coefficients of combined_factor with keys 'volatility', 'volume', 'range', 'momentum'.
+    """
+
+    def __init__(self, data: pd.DataFrame, base_period: int, weights: dict = None):
         if not isinstance(data, pd.DataFrame):
             raise ValueError("Input data must be a pandas DataFrame.")
         required_columns = {'Close', 'Volume', 'High', 'Low'}
@@ -304,30 +382,34 @@ class AdaptiveEMA:
         self.data = data
         self.base_period = base_period
         self.weights = weights or {'volatility': 0.4, 'volume': 0.3, 'range': 0.2, 'momentum': 0.1}
-        self.recommended_period, self.metrics = self._calculate_adaptive_ema_period()
-        self.adaptive_ema = self.data['Close'].ewm(span=self.recommended_period).mean()
+        self.recommended_period, self.metrics = self.calculate_adaptive_ema_period()
 
-    def get_performance_metrics(self)->dict:
+        # 保證對齊原始 DataFrame，填補無法計算的前幾筆資料
+        self.adaptive_ema = self.data['Close'].ewm(span=self.recommended_period, adjust=True).mean().reindex_like(self.data)
+
+    def get_performance_metrics(self) -> dict:
+        """Returns the performance metrics used in calculating the adaptive EMA period."""
         return self.metrics
-    def get_ema(self)->pd.Series:
-        return self.adaptive_ema
-    def calculate_adaptive_ema_period(self)->dict:
-        """
-        min_period: minimum allowed EMA period
-        max_period: maximum allowed EMA period
 
+    def get_ema(self) -> pd.Series:
+        """Returns the adaptive EMA as a pandas Series, aligned with the original data."""
+        return self.adaptive_ema
+
+    def calculate_adaptive_ema_period(self) -> tuple:
+        """
+        Calculates the recommended adaptive EMA period based on market characteristics.
+        
         Returns:
-        int: recommended EMA period
-        dict: market metrics used in calculation
+        tuple: (final_period, metrics)
         """
         data = self.data.copy()
         base_period = self.base_period
-        min_period = int(base_period/2)
-        max_period = int(base_period*2)
+        min_period = int(base_period / 2)
+        max_period = int(base_period * 2)
         weights = self.weights
         TRADING_DAYS = 252
-        # 1. 計算波動度（volatility）
 
+        # 1. 計算波動度（volatility）
         returns = data['Close'].pct_change()
         volatility = returns.std() * np.sqrt(TRADING_DAYS)  # 年化波動度
 
@@ -342,28 +424,12 @@ class AdaptiveEMA:
         momentum = (data['Close'].iloc[-1] / data['Close'].iloc[0]) - 1
 
         # 5. 根據不同的市場衡量值，計算對基準週期的調整因子
-        #    (a) volatility_factor：波動度因子
-        #        波動度越高，越傾向縮短週期（因為想要更即時地反應市場狀況）
-        #        這裡以 (1 - (volatility / 2)) 作為衡量，高波動度時會降低此因子
         volatility_factor = 1 - (volatility / 2)
-
-        #    (b) volume_factor：成交量因子
-        #        交易量越穩定(變異係數低)，越傾向拉長週期（因為市場環境較為平穩）
-        #        這裡以 (1 + volume_cv) 作為衡量，若成交量變異大，就會提高此因子
-        volume_factor = 1 + (volume_cv)
-
-        #    (c) range_factor：價格區間因子
-        #        價格波動區間大，表示市場波動更激烈，週期宜縮短
-        #        這裡以 (1 - (avg_range * 10)) 作為衡量，若 avg_range 大，則因子會被減小
+        volume_factor = 1 + volume_cv
         range_factor = 1 - (avg_range * 10)
-
-        #    (d) momentum_factor：動能因子
-        #        趨勢方向越強（正或負），越傾向拉長週期，追蹤長期趨勢
-        #        這裡以 (1 + abs(momentum)) 作為衡量，動能大則因子增大
         momentum_factor = 1 + abs(momentum)
 
         # 6. 將各因子以不同權重加總，形成最終的綜合因子（combined_factor）
-        #    此處權重為：波動度 0.4、成交量 0.3、價格區間 0.2、動能 0.1
         combined_factor = (
             volatility_factor * weights['volatility'] +
             volume_factor * weights['volume'] +
@@ -389,17 +455,18 @@ class AdaptiveEMA:
 
         return final_period, metrics
 
+
         
-class TrendMarked():
+class TrendMarked:
     """
     A class to compute and visualize trends in time series data, including moving average, 
     short-term trends, peaks, valleys, and overall trend slopes.
 
     Parameters:
-    data: pandas dataframe with columns "Datetime" and specific symbol
-    symbol: str for choose which column to compute trends
-    windows: distance for scipy.find_peaks. distance:Required minimal horizontal distance (>= 1) in samples between neighbouring peaks.
-    ma_window: moving average window
+    data (pd.DataFrame): Input data containing at least 'Datetime' and the specified symbol column.
+    symbol (str): The column name representing the price to calculate trends for.
+    window (int): The window size for calculating slopes and detecting peaks/valleys.
+    ma_window (int): The window size for calculating the moving average (default: 5).
     """
 
     def __init__(self, data: pd.DataFrame, symbol: str, window: int, ma_window: int = 5):
@@ -420,11 +487,16 @@ class TrendMarked():
         self.trends = self.compute()
 
     def compute(self) -> pd.DataFrame:
+        """
+        Computes the moving average, short-term trends, peaks, valleys, slopes, and overall trends.
+        Ensures that the output DataFrame is aligned with the original data.
+        """
         df = self.data.copy()
         df['moving_avg'] = df[self.symbol].rolling(window=self.ma_window).mean()
         df['diff'] = df[self.symbol].diff()
         df['short_term_trend'] = df['diff'].apply(lambda x: 1 if x > 0 else -1 if x < 0 else 0)
         
+        # Detect peaks and valleys
         peaks, _ = find_peaks(df[self.symbol], distance=self.window)
         valleys, _ = find_peaks(-df[self.symbol], distance=self.window)
         
@@ -433,10 +505,17 @@ class TrendMarked():
         df['is_valley'] = False
         df.loc[valleys, 'is_valley'] = True
         
+        # Calculate slope using linear regression and ensure alignment with the original data
         df['slope'] = df[self.symbol].rolling(window=self.window).apply(
             lambda x: np.polyfit(range(len(x)), x, 1)[0], raw=False
         )
+        
+        # Determine overall trend based on slope
         df['trend'] = df['slope'].apply(lambda x: 1 if x > 0 else -1 if x < 0 else 0)
+        
+        # Fill NaN values in the first 'window' rows to ensure alignment with original data
+        df['trend'].fillna(0, inplace=True)
+        df['slope'].fillna(0, inplace=True)
         
         return df
 
@@ -445,7 +524,13 @@ class TrendMarked():
         return self.trends
 
     def get_plot(self, show_peaks_valleys=True, save_path=None):
-        """Plots the original data, moving average, and optionally peaks/valleys."""
+        """
+        Plots the original data, moving average, and optionally peaks/valleys.
+        
+        Parameters:
+        show_peaks_valleys (bool): Whether to display peaks and valleys in the plot (default: True).
+        save_path (str): If specified, saves the plot to the given path.
+        """
         df = self.trends
         plt.figure(figsize=(10, 6))
         plt.plot(df['Datetime'], df[self.symbol], label='Original Data', color='black')
@@ -481,17 +566,49 @@ if __name__=='__main__':
     # plt.plot([80]*len(rsi),color = 'gold',label = '70',lw = 2)
     # #plt.plot(ema,color = "red",label='ema5')
     # plt.show()
-    df = pd.read_csv(r"C:\Users\louislin\OneDrive\桌面\data_analysis\backtesting_system\data\1d_BNBUSDT.csv",index_col='Datetime')
-    print(df.iloc[0:60])
-    indicator = trend(df.iloc[0:60],"Close",10)
-    # print(indicator.get_trends())
-    # print(indicator.get_plot())
-    # macd = MACD(df.iloc[0:60],'Close',14,26,9)
-    # diff = macd.get_MACD()
-    # dem = macd.get_signal()
-    # print(f"MACD INFO:\nDIFF:\n{diff}DEM:\n{dem}")
-    # diff_trend = trend(diff,'Close',5)
-    # print(diff_trend.get_trends())
+    # df = pd.read_csv(r"C:\Users\louislin\OneDrive\桌面\data_analysis\backtesting_system\data\1d_BNBUSDT.csv")
+    # print(df)
+    # # print(df.iloc[0:60])
+    # # indicator = TrendMarked(df.iloc[0:60],"Close",10)
+    # # print(indicator.get_trends())
+    # # indicator.get_plot()
+    # # print(indicator.get_trends())
+    # # print(indicator.get_plot())
+    # # macd = MACD(df.iloc[0:60],'Close',14,26,9)
+    # # diff = macd.get_MACD()
+    # # dem = macd.get_signal()
+    # # print(f"MACD INFO:\nDIFF:\n{diff}DEM:\n{dem}")
+    # # diff_trend = trend(diff,'Close',5)
+    # # print(diff_trend.get_trends())
+    # # 建立 AdaptiveEMA 物件
+    # adaptive_ema = AdaptiveEMA(df, base_period=10)
+
+    # # 輸出 Adaptive EMA
+    # print(adaptive_ema.get_ema())
+
+    # # 輸出計算指標
+    # print(adaptive_ema.get_performance_metrics())
+    # 測試初始數據
+    data = pd.DataFrame({
+        'Datetime': pd.date_range(start='2025-01-01', periods=10, freq='D'),
+        'Close': [100, 102, 101, 105, 110, 108, 107, 109, 111, 112]
+    })
+
+    # 建立 SmoothMovingAverage 物件
+    sma = SmoothMovingAverage(data, symbol='Close', window=3)
+    print("Initial SMA:")
+    print(sma.get_sma())
+
+    # 更新數據
+    new_data = pd.DataFrame({
+        'Datetime': pd.date_range(start='2025-01-11', periods=5, freq='D'),
+        'Close': [113, 115, 114, 116, 118]
+    })
+
+    # 更新 SMA 並輸出結果
+    sma.update_sma(new_data)
+    print("\nUpdated SMA:")
+    print(sma.get_sma())
 
     
   
