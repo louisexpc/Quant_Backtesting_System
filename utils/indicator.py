@@ -360,6 +360,38 @@ class MACD:
     def get_short_ema(self) -> pd.Series:
         """Returns the short EMA as a pandas Series, aligned with the original data."""
         return self.short_ema
+    def plot_macd_with_histogram(self):
+        """
+        Plots the MACD histogram and signal line.
+        - Histogram bars are green if > 0, red if < 0.
+        - Signal line is orange.
+        - MACD line is blue.
+        """
+        macd_line = self.get_macd_line()
+        signal_line = self.get_signal_line()
+        histogram = self.get_histogram_line()
+
+        plt.figure(figsize=(12, 6))
+
+        # 繪製 Histogram
+        colors = ['green' if val > 0 else 'red' for val in histogram]
+        plt.bar(self.data.index, histogram, color=colors, alpha=0.7, label='Histogram', width=0.8)
+
+        # 繪製 MACD 與信號線
+        plt.plot(self.data.index, macd_line, color='blue', label='MACD Line', linewidth=1.5)
+        plt.plot(self.data.index, signal_line, color='orange', label='Signal Line', linewidth=1.5)
+
+        # 設置範圍與標籤
+        plt.ylim(-100, 100)
+        plt.axhline(0, color='black', linewidth=0.5, linestyle='--')
+        plt.title('MACD and Histogram')
+        plt.xlabel('Date')
+        plt.ylabel('Value')
+        plt.legend()
+        plt.grid(alpha=0.3)
+
+        # 顯示圖形
+        plt.show()
 
 
 class AdaptiveEMA:
@@ -550,67 +582,92 @@ class TrendMarked:
         plt.show()
 
 
+import pandas as pd
+import numpy as np
+
+class ATR:
+    """
+    A class to compute the Average True Range (ATR) based on OHLCV data.
+
+    Parameters:
+    data (pd.DataFrame): Input data containing OHLCV information.
+    window (int): The window size for exponential moving average (default: 14).
+    """
+
+    def __init__(self, data: pd.DataFrame, window: int = 14):
+        """
+        Initializes the ATR calculation with the provided OHLCV data.
+
+        Parameters:
+        data: pd.DataFrame contains columns ['Close', 'High', 'Low', 'Open', 'Volume'].
+        window: int, for the exponential moving average of TR.
+        """
+        if not isinstance(data, pd.DataFrame):
+            raise ValueError("Input data must be a pandas DataFrame.")
+        required_columns = {'Close', 'High', 'Low', 'Open', 'Volume'}
+        if not required_columns.issubset(data.columns):
+            raise ValueError(f"DataFrame must contain the following columns: {required_columns}")
+        if data.empty:
+            raise ValueError("Input data must not be empty.")
+        if not isinstance(window, int) or window <= 0:
+            raise ValueError("Window size must be a positive integer.")
+        for col in required_columns:
+            if not pd.api.types.is_numeric_dtype(data[col]):
+                raise ValueError(f"Column '{col}' must contain numeric data.")
+
+        self.data = data
+        self.window = window
+        self.atr = self.compute_atr()
+
+    def compute_atr(self) -> pd.Series:
+        """
+        Computes the Average True Range (ATR) based on OHLCV data.
+        True Range (TR) = max(High - Low, |High - Previous Close|, |Previous Close - Low|).
+
+        Returns:
+        pd.Series: The computed ATR values, aligned with the original data.
+        """
+        # 計算三種距離
+        high_low = self.data['High'] - self.data['Low']
+        high_close = abs(self.data['High'] - self.data['Close'].shift(1))
+        close_low = abs(self.data['Close'].shift(1) - self.data['Low'])
+
+        # 計算逐行的最大值
+        tr = np.maximum.reduce([high_low, high_close, close_low])
+
+        # 計算 ATR
+        atr = pd.Series(tr).ewm(span=self.window, adjust=True, ignore_na=True).mean()
+        return atr
+
+    def get_atr(self) -> pd.Series:
+        """
+        Returns the computed ATR as a pandas Series, aligned with the original data.
+
+        Returns:
+        pd.Series: The ATR values.
+        """
+        return self.atr
+
+    def get_atr_std(self) -> float:
+        """
+        Returns the standard deviation of the computed ATR values.
+
+        Returns:
+        float: The 1 standard deviation of ATR values.
+        """
+        if self.atr.isna().all():
+            raise ValueError("ATR contains only NaN values, standard deviation cannot be computed.")
+        return float(self.atr.dropna().std())
+
+
 if __name__=='__main__':
-    # 載入資料
-    # data = pd.read_csv("btc_usd_20231013_20241113.csv")
-    # print(data.head())
-    # instance = StochasticRSI(data,"Close")
-    # rsi = instance.get_stochastic_rsi()*100
-    # ema = ExponentialMovingAverage(data,'Close',5).get_ema()
-    # rsi.to_csv("rsi.csv")
-    # ema.to_csv("ema.csv")
-    # plt.figure(figsize=(16,9))
-    # #plt.plot(data['Close'],color = 'blue',label ='close')
-    # plt.plot(rsi,color = 'blue',label='rsi')
-    # plt.plot([20]*len(rsi),color = 'gold',label = '70',lw = 2)
-    # plt.plot([80]*len(rsi),color = 'gold',label = '70',lw = 2)
-    # #plt.plot(ema,color = "red",label='ema5')
-    # plt.show()
-    # df = pd.read_csv(r"C:\Users\louislin\OneDrive\桌面\data_analysis\backtesting_system\data\1d_BNBUSDT.csv")
-    # print(df)
-    # # print(df.iloc[0:60])
-    # # indicator = TrendMarked(df.iloc[0:60],"Close",10)
-    # # print(indicator.get_trends())
-    # # indicator.get_plot()
-    # # print(indicator.get_trends())
-    # # print(indicator.get_plot())
-    # # macd = MACD(df.iloc[0:60],'Close',14,26,9)
-    # # diff = macd.get_MACD()
-    # # dem = macd.get_signal()
-    # # print(f"MACD INFO:\nDIFF:\n{diff}DEM:\n{dem}")
-    # # diff_trend = trend(diff,'Close',5)
-    # # print(diff_trend.get_trends())
-    # # 建立 AdaptiveEMA 物件
-    # adaptive_ema = AdaptiveEMA(df, base_period=10)
-
-    # # 輸出 Adaptive EMA
-    # print(adaptive_ema.get_ema())
-
-    # # 輸出計算指標
-    # print(adaptive_ema.get_performance_metrics())
-    # 測試初始數據
-    data = pd.DataFrame({
-        'Datetime': pd.date_range(start='2025-01-01', periods=10, freq='D'),
-        'Close': [100, 102, 101, 105, 110, 108, 107, 109, 111, 112]
-    })
-
-    # 建立 SmoothMovingAverage 物件
-    sma = SmoothMovingAverage(data, symbol='Close', window=3)
-    print("Initial SMA:")
-    print(sma.get_sma())
-
-    # 更新數據
-    new_data = pd.DataFrame({
-        'Datetime': pd.date_range(start='2025-01-11', periods=5, freq='D'),
-        'Close': [113, 115, 114, 116, 118]
-    })
-
-    # 更新 SMA 並輸出結果
-    sma.update_sma(new_data)
-    print("\nUpdated SMA:")
-    print(sma.get_sma())
-
-    
+    df = pd.read_csv(r"C:\Users\louislin\OneDrive\桌面\data_analysis\backtesting_system\data\1d_BNBUSDT.csv")
+    df = df.loc[:60,:]
+    print(df)
+    macd = MACD(df,'Close')
+    print(macd.get_macd_line())
+    print(macd.get_signal_line())
+    macd.plot_macd_with_histogram()
   
     
     

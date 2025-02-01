@@ -4,11 +4,14 @@ import os
 import time
 
 from pkg.ConfigLoader import config
-from utils.indicator import ExponentialMovingAverage,MACD,StochasticRSI
+from utils.indicator import ExponentialMovingAverage,MACD,StochasticRSI,RSI
+from utils.trend_classification import trend_quantified
 
 
 STRATEGY_CONFIG = "C:\\Users\\louislin\\OneDrive\\桌面\\data_analysis\\backtesting_system\\strategy\\macd_cross.json"
 STRATEGY_NAME = "macd_cross"
+
+
 class macd_cross(object):
     def __init__(self,original_data:dict):
         self.original_data = original_data

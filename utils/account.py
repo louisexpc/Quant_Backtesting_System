@@ -11,12 +11,18 @@ class Account(object):
             return instance
 
     def __init__(self, id):
-        # 初始化時檢查是否已經初始化過該實例
         if hasattr(self, '_initialized') and self._initialized:
             return
         self._initialized = True
+        '''
+        Account Information]
+        id: account id
+        spot_balance:現貨帳戶 USDT 餘額
+        future_balance:合約帳戶 USDT 餘額
 
-        # 帳戶資訊
+        '''
+        self.spot_balance = 0
+        self.future_balance = 0
         self.id = id
         self.asset = 0
         '''
@@ -26,6 +32,11 @@ class Account(object):
         '''
         self.commission = 0
         self.history=order_history()
+        '''
+        future:
+        total_margins: float, 所有合約保證金總和
+        '''
+        self.total_margins = 0
         
 
     def set_asset(self, cash):
