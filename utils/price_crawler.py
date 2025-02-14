@@ -51,8 +51,10 @@ def fetch_all_ohlcv( symbols:list, timeframe:str, since:int, limit=1000)->None:
 
 # 配置參數
 symbols = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"]  # 交易對
+symbols = ["BTCUSDT"]  # 交易對
+
 timeframe = '1d'     # 時間週期
-since = int(datetime(2022, 1, 1).timestamp() * 1000)  # 起始時間（yyyy-mm-dd）
+since = int(datetime(2025, 1, 1).timestamp() * 1000)  # 起始時間（yyyy-mm-dd）
 
 # 獲取完整資料
 data = fetch_all_ohlcv(symbols, timeframe, since)

@@ -11,6 +11,59 @@ from utils.trend_classification import trend_quantified
 STRATEGY_CONFIG = "C:\\Users\\louislin\\OneDrive\\桌面\\data_analysis\\backtesting_system\\strategy\\macd_cross.json"
 STRATEGY_NAME = "macd_cross"
 
+class MACD_CROSS(object):
+    def __init__(self, data_paths: list, symbols: list):
+        self.symbols = symbols
+        self.data_paths = data_paths
+        self._idx = 0  # 統一的時間索引
+        self.original_datas = self.loading_data()
+        
+
+        self.config = config(STRATEGY_CONFIG).load_config()[STRATEGY_NAME]
+        self.param = self.config['param']
+        self.limit = self.config['limit']
+
+    def loading_data(self) -> dict:
+        """Loads CSV files based on symbols and paths."""
+        original_data = {}
+        for i in range(len(self.data_paths)):
+            try:
+                original_data[self.symbols[i]] = pd.read_csv(self.data_paths[i])
+            except FileNotFoundError as e:
+                print(f"[Error] Unable to load file {self.symbols[i]} at {self.data_paths[i]}. Details: {e}")
+        return original_data
+    
+    def generate_signal(self) -> dict:
+        signals = {}
+        for symbol in self.symbols:
+            if symbol not in self.original_datas:
+                raise ValueError(f"Market data for {symbol} not available.")
+            
+            data = self.original_datas[symbol]
+            feature = pd.DataFrame()
+
+            indicator = MACD(data, "Close", 
+                            self.param['macd_short_period'], 
+                            self.param['macd_long_period'], 
+                            self.param['macd_signal_period'])
+
+            feature["diff"] = indicator.get_macd_line()
+            feature["dea"] = indicator.get_signal_line()
+
+            def classify_signal(row: pd.Series):
+                if row["diff"] is not None and row["dea"] is not None:
+                    return float(row["diff"]) > float(row["dea"])
+                return False  
+
+            signals[symbol] = feature.apply(classify_signal, axis=1)
+
+        return signals
+
+
+            
+
+            
+
 
 class macd_cross(object):
     def __init__(self,original_data:dict):
@@ -51,8 +104,8 @@ class macd_cross(object):
             data = self.data[symbol].to_frame(name =symbol)
            
             indicator=MACD(data,symbol,self.param['macd_short_period'],self.param['macd_long_period'],self.param['macd_signal_period'])
-            diff = indicator.get_MACD()
-            dea = indicator.get_signal()
+            diff = indicator.get_macd_line()
+            dea = indicator.get_signal_line()
             long_ema = indicator.get_long_ema()
             mid_ema = ExponentialMovingAverage(data,symbol,self.param['ema_period']).get_ema()
             short_ema = indicator.get_short_ema()

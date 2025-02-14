@@ -1,6 +1,6 @@
 {
     "macd_cross":{
-        "symbol":["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"],
+        "symbol":["BTCUSDT"],
         "timeframe":"15m",
         "limit":79,
         "param":{

@@ -1,4 +1,3 @@
-from utils.order import order_history
 class Account(object):
     _instances = {}  
 
@@ -11,42 +10,27 @@ class Account(object):
             return instance
 
     def __init__(self, id):
+        # 避免重複初始化
         if hasattr(self, '_initialized') and self._initialized:
             return
         self._initialized = True
-        '''
-        Account Information]
-        id: account id
-        spot_balance:現貨帳戶 USDT 餘額
-        future_balance:合約帳戶 USDT 餘額
-
-        '''
+        """
+        [Account Information]
+          - id: account identifier
+          - spot_balance: 現貨帳戶 USDT 餘額
+          - future_balance: 合約帳戶 USDT 餘額
+        """
         self.spot_balance = 0
         self.future_balance = 0
         self.id = id
-        self.asset = 0
-        '''
-        交易資訊:
-        commission: 交易手續費
-        history: order_history 物件，紀錄訂單/持倉
-        '''
-        self.commission = 0
-        self.history=order_history()
-        '''
-        future:
-        total_margins: float, 所有合約保證金總和
-        '''
-        self.total_margins = 0
-        
 
-    def set_asset(self, cash):
-        self.asset = cash
-
-    def get_asset(self):
-        return self.asset
-
-    def set_commission(self, commission):
-        self.commission = commission
-
+    def set_future_balance(self,balance:float):
+        if balance<0:
+            raise ValueError("Future balance shoud larger than 0")
+        self.future_balance = balance
     
-
+    def set_spot_balance(self,balance:float):
+        if balance<0:
+            raise ValueError("Spot balance shoud larger than 0")
+        self.spot_balance = balance
+    
