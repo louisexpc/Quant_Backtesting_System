@@ -165,7 +165,8 @@ class Spot:
             "symbol": symbol,
             "entry_price": execution_price,
             "size": quantity,
-            "timestamp": self.data_instance.get_current_data()[symbol]['Datetime'],
+            "timestamp": self.data_instance.get_current_index(),
+            "datetime": self.data_instance.get_current_data()[symbol]['Datetime'],
             "take_profit": take_profit,
             "stop_loss": stop_loss
         }
@@ -249,7 +250,8 @@ class Spot:
             self.account.spot_balance += gain
             closed_position = pos.to_dict()
             closed_position["exit_price"] = exit_price
-            closed_position["exit_timestamp"] = self.data_instance.get_current_data()[symbol]['Datetime']
+            closed_position["exit_timestamp"] = self.data_instance.get_current_index()
+            closed_position["exit_datetime"] = self.data_instance.get_current_data()[symbol]['Datetime']
             closed_position["gain"] = gain
             closed_position["pnl"] = pnl
             closed_positions.append(closed_position)

@@ -62,7 +62,7 @@ class Future:
         self.account = account
         # 取得 DataSingleton 物件（若上層已初始化，這裡會取得先前資料）
         self.data_instance = DataSingleton([], [])
-        print(f"initial future data instance:\n{self.data_instance.get_current_index()}\n{self.data_instance.get_current_data()}")
+        #print(f"initial future data instance:\n{self.data_instance.get_current_index()}\n{self.data_instance.get_current_data()}")
         # 註冊 callback 更新市場資料與訂單檢查
         self.data_instance.register_callback(self.update_data)
         # 初始化時取得市場資料，避免 self.current_data 為空
@@ -99,7 +99,7 @@ class Future:
             return 0.0
 
         self.positions["unrealized_pnl"] = self.positions.apply(compute_upnl, axis=1)
-        print(f"Positions:\n{self.positions}")
+        #print(f"Positions:\n{self.positions}")
 
     def calculate_liquidation_price(self, symbol: str, quantity: float, entry_price: float, side: int, leverage: int) -> float:
         """
@@ -143,7 +143,9 @@ class Future:
 
         required_margin = notional / leverage
         if self.account.future_balance < required_margin:
-            raise ValueError("Insufficient funds to open position (margin requirement not met).")
+            #raise ValueError("Insufficient funds to open position (margin requirement not met).")
+            print(f"Insufficient funds to open position (margin requirement not met).")
+            return
         
         # 市價單：使用當前成交價計算實際數量
         if order_type == "market":
@@ -186,7 +188,9 @@ class Future:
         """
         order_value = execution_price * quantity
         if order_value < MINIMUM_ORDER:
-            raise ValueError(f"Order value must be at least {MINIMUM_ORDER} USDT.")
+            #raise ValueError(f"Order value must be at least {MINIMUM_ORDER} USDT.")
+            print(f"Insufficient funds to open position (margin requirement not met).")
+            return
         fee_type = "taker" if order_type == "market" else "maker"
         fees = self.calculate_fees(order_value, fee_type)
         # 若 reserved_margin 已提供，則使用之；否則，扣除保證金（理論上應該總是有 reserved_margin）
@@ -205,6 +209,7 @@ class Future:
             "entry_price": execution_price,
             "size": quantity,
             "timestamp": self.data_instance.get_current_index(),
+            "datetime":self.data_instance.get_current_data()[symbol]["Datetime"],
             "side": side,
             "leverage": leverage,
             "liquidation_price": liquidation_price,
@@ -212,7 +217,7 @@ class Future:
             "stop_loss": stop_loss,
             "margin": margin
         }
-        
+        print(f"order execute:\n{order}")
         self._order_id += 1
         # 扣除手續費
         self.account.future_balance -= fees
@@ -315,40 +320,128 @@ class Future:
             symbol = pos["symbol"]
             if symbol not in self.current_data or self.current_data[symbol] is None:
                 continue
+            # 計算收益與手續費
             exit_price = self.simulate_slippage(self.current_data[symbol]["Close"])
-            pnl = (exit_price - pos["entry_price"]) * pos["size"] * pos["side"]
-            fees = self.calculate_fees(abs(pnl))
-            pnl -= fees
+            fees = self.calculate_fees(exit_price * pos["size"])
+            pnl = (exit_price - pos["entry_price"]) * pos["size"] * pos["side"] - fees
+            
             # 將原先預留的 margin 回補，加上盈虧後更新帳戶餘額
             margin = pos.get("margin", 0)
             self.account.future_balance += (margin + pnl)
             closed_position = pos.to_dict()
             closed_position["exit_price"] = exit_price
             closed_position["exit_timestamp"] = self.data_instance.get_current_index()
+            closed_position["exit_datetime"] = self.data_instance.get_current_data()[symbol]["Datetime"]
             closed_position["pnl"] = pnl
             closed_positions.append(closed_position)
         self.positions = self.positions.drop(position.index)
         self.history_positions = pd.concat([self.history_positions, pd.DataFrame(closed_positions)], ignore_index=True)
         return pd.DataFrame(closed_positions)
+    
+    def evolution(self, Rf: float = 0.0) -> dict:
+        """
+        計算並回傳回測期間的指標評估，支援多標的：
+        - Sharpe Ratio: (E(Rp)-Rf) / σp, 其中 Rp = net_profit / total_cost
+        - Profit/Loss Ratio: 平均獲利 / 平均虧損
+        - Win Rate: 獲利交易比例
+        - Maximum Drawdown: 指定標的市場資料中的最大回撤
+        - ROI: 總盈虧 / 總成本
+        其中，net_profit 與 total_cost 以 history_positions 中每筆交易計算：
+        net_profit = pnl, total_cost = entry_price * size
+
+        Returns:
+        dict: 形如 {symbol1: {指標...}, symbol2: {指標...}, ...}
+        """
+        if self.history_positions.empty:
+            return {}
+        # 依標的分組計算指標
+        results = {}
+        for symbol in self.data_instance.symbols:
+            hp_symbol = self.history_positions[self.history_positions["symbol"] == symbol].copy()
+            if hp_symbol.empty:
+                continue
+            hp_symbol["total_cost"] = hp_symbol["entry_price"].astype(float) * hp_symbol["size"].astype(float)
+            hp_symbol["net_profit"] = hp_symbol["pnl"].astype(float)
+            
+            # 指標計算函式
+            def sharp_ratio(net_profit: pd.Series, total_cost: pd.Series, Rf: float) -> float:
+                Rp = net_profit / total_cost
+                Expectation = Rp.mean()
+                variance = ((Rp - Expectation) ** 2).sum() / (Rp.size - 1) if Rp.size > 1 else 0.0
+                std = variance ** 0.5 
+                sharpe = (Expectation - Rf) / std if std != 0 else float('inf')
+                return float(sharpe)
+        
+            def profit_loss_ratio(net_profit: pd.Series) -> float:
+                average_gain = net_profit[net_profit > 0].mean() if net_profit[net_profit > 0].size > 0 else 0.0
+                average_loss = abs(net_profit[net_profit < 0].mean()) if net_profit[net_profit < 0].size > 0 else 0.0
+                PL_ratio = average_gain / average_loss if average_loss != 0 else float('inf')
+                return float(PL_ratio)
+        
+            def win_rate(net_profit: pd.Series) -> float:
+                total_trade_number = net_profit.size
+                if total_trade_number == 0:
+                    return 0.0
+                profit_trade_number = net_profit[net_profit > 0].size
+                return float(profit_trade_number / total_trade_number)
+        
+            def maximum_drawdown(close_series: pd.Series) -> float:
+                cumulative_max = close_series.cummax()
+                drawdowns = (close_series - cumulative_max) / cumulative_max
+                return float(drawdowns.min())
+        
+            def roi(net_profit: float, total_cost: float) -> float:
+                return net_profit / total_cost if total_cost != 0 else 0.0
+            
+            sharpe = sharp_ratio(hp_symbol["net_profit"], hp_symbol["total_cost"], Rf)
+            pl_ratio = profit_loss_ratio(hp_symbol["net_profit"])
+            winrate = win_rate(hp_symbol["net_profit"])
+            total_net_profit = hp_symbol["net_profit"].sum()
+            total_cost = hp_symbol["total_cost"].sum()
+            overall_roi = roi(total_net_profit, total_cost)
+        
+            # 以此標的的市場資料計算最大回撤
+            close_series = self.data_instance.original_datas[symbol]["Close"].astype(float)
+            mdd = maximum_drawdown(close_series)
+        
+            results[symbol] = {
+                "sharpe_ratio": sharpe,
+                "profit_loss_ratio": pl_ratio,
+                "win_rate": winrate,
+                "maximum_drawdown": mdd,
+                "roi": overall_roi
+            }
+        return results
 
 if __name__ =="__main__":
     symbols = ["BTCUSDT",""]
-    data_paths = [r"C:\Users\louislin\OneDrive\桌面\data_analysis\backtesting_system\4h_BTCUSDT.csv"]
+    data_paths = [r"C:\Users\louislin\OneDrive\桌面\data_analysis\backtesting_system\test.csv"]
     
     ds = DataSingleton(data_paths, symbols)
     print("DataSingleton 初始化完成，載入市場數據：")
     print(ds.original_datas)
     account = Account("test_account")
-    account.future_balance = 10000  # 設定 10000 USDT
-    print("建立 Account，初始 future_balance:", account.future_balance)
+    account.set_future_balance(10000)  # 設定 10000 USDT
 
     # --- Step 4: 建立 Future 實例 ---
     future = Future(account)
-    future.create_order("BTCUSDT",1,1000)
-    for i in range(5):
-        ds.run()
-    future.close_position(0)
+    print(ds.get_current_data())
+    future.create_order(symbols[0],1,1000,price=1000,order_type="limit",take_profit=1200)
+    print(ds.get_current_data())
+    print(f"下單後帳戶餘額變化:{account.future_balance}")
+    print(f"{future.order_book}")
     ds.run()
-    print(account.future_balance)
+    # print(f"訂單觸發:{ds.get_current_data()}")
+    # print(f"訂單執行帳戶餘額變化:{account.future_balance}")
+    # print(f"{future.order_book}")
+    # print(f"{future.positions}")
+    ds.run()
+    print(f"平倉:{ds.get_current_data()}")
+    print(f"平倉帳戶餘額變化:{account.future_balance}")
+    print(f"{future.order_book}")
+    print(f"{future.positions}")
+    print(f"{future.history_positions}")
+
+    
 
     pass
