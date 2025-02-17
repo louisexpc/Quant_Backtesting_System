@@ -2,19 +2,78 @@ import pandas as pd
 import numpy as np
 import os
 import time
+import talib
 
 from pkg.ConfigLoader import config
+from utils.data import DataSingleton
 from utils.indicator import ExponentialMovingAverage, MACD, StochasticRSI, RSI
 from utils.trend_classification import trend_quantified
 
 STRATEGY_CONFIG = "C:\\Users\\louislin\\OneDrive\\桌面\\data_analysis\\backtesting_system\\strategy\\macd_cross.json"
 STRATEGY_NAME = "macd_cross"
+class MACD_EMA(object):
+    def __init__(self, data_paths: list, symbols: list):
+        self.symbols = symbols
+        self.data_paths = data_paths
+        self.original_datas = self.loading_data()
+
+        self.config = config(STRATEGY_CONFIG).load_config()[STRATEGY_NAME]
+        self.param = self.config['param']
+        self.limit = self.config['limit']
+    def loading_data(self) -> dict:
+        """Loads CSV files based on symbols and paths."""
+        original_data = {}
+        for i in range(len(self.data_paths)):
+            try:
+                original_data[self.symbols[i]] = pd.read_csv(self.data_paths[i])
+            except FileNotFoundError as e:
+                print(f"[Error] Unable to load file {self.symbols[i]} at {self.data_paths[i]}. Details: {e}")
+        return original_data
+    
+    def generate_signal(self)->dict:
+        """
+        Generate signal
+        return: dict
+        {symbol(str), signal(pd.Dataframe)}
+        """
+        signals={}
+        for symbol in self.symbols:
+            data = self.original_datas[symbol]
+            feature = pd.DataFrame()
+            feature["long_ema"] = talib.EMA(data["Close"],60)
+            feature["short_ema"] = talib.EMA(data["Close"],30)
+            macd,signal,hist = talib.MACD(data["Close"],24,52)
+            feature["diff"] = macd
+            feature["dea"] = signal
+            
+            print("down")
+            def classify_signal(row: pd.Series) -> int:
+                """ 計算交易訊號 """
+                # 若滯後資料為空，回傳 0
+                if pd.isnull(row["long_ema"]) or pd.isnull(row["dea"]) or pd.isnull(row["diff"]):
+                    return 0
+                
+                if row["short_ema"]>row["long_ema"] and row["dea"]>row["diff"]:
+                    return 1
+                elif row["short_ema"]<row["long_ema"] and row["dea"]<row["diff"]:
+                    return -1
+                else:
+                    return 0
+            signals[symbol] = feature.apply(classify_signal, axis=1)
+     
+        
+            
+
+    
+        return signals
+
+
 
 class MACD_CROSS(object):
     def __init__(self, data_paths: list, symbols: list):
         self.symbols = symbols
         self.data_paths = data_paths
-        self._idx = 0  # 統一的時間索引
+        
         self.original_datas = self.loading_data()
         
         self.config = config(STRATEGY_CONFIG).load_config()[STRATEGY_NAME]
@@ -118,3 +177,8 @@ class MACD_CROSS(object):
             signals[symbol] = feature.apply(classify_signal, axis=1)
 
         return signals
+if __name__=="__main__":
+    symbol = ["BTCUSDT"]
+    data_path =[rf"C:\Users\louislin\OneDrive\桌面\data_analysis\backtesting_system\test.csv"]
+    macd = MACD_EMA(symbol,data_path)
+    macd.generate_signal()
