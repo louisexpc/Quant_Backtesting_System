@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import time
 
-def fetch_all_ohlcv( symbols:list, timeframe:str, since:int, limit=1000)->None:
+def fetch_all_ohlcv( symbols:list, timeframe:str, since:int, limit=1000)->list:
     """
     獲取 Binance 的完整 OHLCV 資料
     :param exchange: ccxt 交易所對象
@@ -12,7 +12,10 @@ def fetch_all_ohlcv( symbols:list, timeframe:str, since:int, limit=1000)->None:
     :param since: 起始時間（Unix 毫秒）
     :param limit: 每次請求的最大條數，默認為 1000
     :return: 包含所有數據的 DataFrame
+
+    return: list, paths of the  crawled data
     """
+    data_paths=[]
     exchange = ccxt.binance()
     for symbol in symbols:
         all_data = []  # 用於存儲所有資料
@@ -45,8 +48,11 @@ def fetch_all_ohlcv( symbols:list, timeframe:str, since:int, limit=1000)->None:
         if df.isnull().any().any():
             print(f"Query {symbol} missing!")
         else:
-            df.to_csv(rf".\data\{timeframe}_{symbol}.csv",index=False)
+            path = rf".\data\{timeframe}_{symbol}.csv"
+            data_paths.append(path)
+            df.to_csv(path,index=False)
         time.sleep(0.5)
+    return data_paths
 
 def fetch_all_funding_rates(symbols: list, since: int, limit=1000) -> None:
     """

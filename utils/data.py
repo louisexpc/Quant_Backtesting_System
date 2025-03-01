@@ -67,7 +67,7 @@ class DataSingleton:
             for callback in self.callbacks:
                 callback(self._idx)
             # 或可加入提醒訊息
-            print(f"Reached the last row of data.\nid: {self._idx} ,{self.get_current_data()}")
+            print(f"Reached the last row of data.id: {self._idx}")
 
 
     def get_current_data(self) -> dict:

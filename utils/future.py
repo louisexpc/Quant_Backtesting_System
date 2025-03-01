@@ -217,7 +217,7 @@ class Future:
             "stop_loss": stop_loss,
             "margin": margin
         }
-        print(f"order execute:\n{order}")
+        #print(f"order execute:\n{order}")
         self._order_id += 1
         # 扣除手續費
         self.account.future_balance -= fees
