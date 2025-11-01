@@ -37,6 +37,18 @@ class DataSingleton:
         for i in range(len(self.data_paths)):
             try:
                 df = pd.read_csv(self.data_paths[i])
+                """
+                Column Standardization:
+                - 先將所有欄位轉為大寫 
+                - 確保所有欄位包含: ['Datetime','Open','High','Low','Close','Volume']
+                """
+                df.columns = [col.capitalize() for col in df.columns]
+                required_cols = ['Datetime', 'Open', 'High', 'Low', 'Close', 'Volume']
+                for col in required_cols:
+                    if col not in df.columns:
+                        raise ValueError(f"Missing required column '{col}' in data for symbol {self.symbols[i]}")
+                df = df[required_cols]
+                
                 original_data[self.symbols[i]] = df
                 # 【修改處】：以 len(df) 計算行數，取最小值
                 if self.length == 0:

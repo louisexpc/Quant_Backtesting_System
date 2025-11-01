@@ -298,15 +298,37 @@ class Future:
                 symbol = row["symbol"]
                 if symbol not in self.current_data or self.current_data[symbol] is None:
                     return False
+                """Update Logic for more solid close condition checking"""
+                # current price define 應該額外檢查該 status 的 High/Low 價格
+                # 以避免跳空等狀況導致 TP/SL 未被觸發
+
                 current_price = self.current_data[symbol]["Close"]
+                current_high = self.current_data[symbol]["High"]
+                current_low = self.current_data[symbol]["Low"]
                 if row["side"] == 1:
-                    liquidation_triggered = current_price <= row["liquidation_price"]
-                    tp_triggered = (pd.notnull(row.get("take_profit")) and current_price >= row["take_profit"])
-                    sl_triggered = (pd.notnull(row.get("stop_loss")) and current_price <= row["stop_loss"])
+                    liquidation_triggered = current_price <= row["liquidation_price"] or current_low <= row["liquidation_price"]
+                    
+                    # 額外處理跳空狀況
+                    if pd.notnull(row.get("take_profit")):
+                        tp_triggered = current_high >= row["take_profit"] or current_price >= row["take_profit"]
+                    else:
+                        tp_triggered = False
+                    if pd.notnull(row.get("stop_loss")):
+                        sl_triggered = current_low <= row["stop_loss"] or current_price <= row["stop_loss"]
+                    else:
+                        sl_triggered = False
+
                 elif row["side"] == -1:
-                    liquidation_triggered = current_price >= row["liquidation_price"]
-                    tp_triggered = (pd.notnull(row.get("take_profit")) and current_price <= row["take_profit"])
-                    sl_triggered = (pd.notnull(row.get("stop_loss")) and current_price >= row["stop_loss"])
+                    liquidation_triggered = current_price >= row["liquidation_price"] or current_high >= row["liquidation_price"]
+                    if pd.notnull(row.get("take_profit")):
+                        tp_triggered = current_low <= row["take_profit"] or current_price <= row["take_profit"]
+                    else:
+                        tp_triggered = False
+                    if pd.notnull(row.get("stop_loss")):
+                        sl_triggered = current_high >= row["stop_loss"] or current_price >= row["stop_loss"]
+                    else:
+                        sl_triggered = False
+                    
                 else:
                     return False
                 return liquidation_triggered or tp_triggered or sl_triggered

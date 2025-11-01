@@ -69,15 +69,133 @@ class backtest_spot(object):
         if not self.spot.trade_history.empty:
             total_pnl = self.spot.trade_history['notional'].sum()
             print(f"總盈虧: {total_pnl}")
-        
-class backtest_future:
+
+class backtest_future_base(object):
     def __init__(self, data_paths: list, symbols: list, account: Account):
+        """
+        Augments:
+        - data_paths: List of file paths to the market data CSVs.
+            - each csv must contain at least ['Timestamp','Open','High','Low','Close','Volume'] columns (Upper / Lower case are all allowed).
+        - symbols: List of trading symbols corresponding to the data paths.
+        - account: An instance of the Account class to manage balances and positions.
+        """
         self.data_paths = data_paths
         self.symbols = symbols
         self.ds = DataSingleton(data_paths, symbols)
         self.account = account
         self.future = Future(account)
         
+        """ Init Your Strategy """
+    def next(self):
+        idx = self.ds.get_current_index()
+        for symbol in self.symbols:
+            """ Implement your strategy logic here """
+            pass
+
+
+    def run(self):
+        self.ds.reset()
+        print(f"Init: {self.ds.get_current_index()} and {self.ds.is_finished()}")
+        
+        for i in range(self.ds.get_total_rows()):
+            
+            self.next()
+            self.ds.run()
+        total_future_balance = self.account.future_balance
+        
+        
+        if not self.future.positions.empty:
+            print(f"持有倉位:\n{self.future.positions}")
+            for _,pos in self.future.positions.iterrows():
+                if "unrealized_pnl" in pos.index:
+                    total_future_balance+=float(pos['unrealized_pnl'])
+                total_future_balance+=float(pos.get('margin'))
+            self.future.positions.to_csv("future_positions.csv")  #原為 future_postions.csv
+        else:
+            print("Not holding position")
+        
+        if not self.future.history_positions.empty:
+            print(f"歷史交易紀錄:\n{self.future.history_positions}")
+            self.future.history_positions.to_csv("history.csv")
+        else:
+            print("Not any trading")
+        print(f"Backtest Down, remain: {total_future_balance}")
+        evolution = self.future.evolution()
+        for symbol, indicators in evolution.items():
+            print(f"標的資產: {symbol}")
+            for indicator, value in indicators.items():
+                print(f"{indicator}: {value}")
+
+class SNR_backtest_future(backtest_future_base):
+    def __init__(self, data_paths: list, symbols: list, account: Account, signal_path:str):
+        """
+        Augments:
+        - data_paths: List of file paths to the market data CSVs.
+            - each csv must contain at least ['Timestamp','Open','High','Low','Close','Volume'] columns (Upper / Lower case are all allowed).
+        - symbols: List of trading symbols corresponding to the data paths.
+        - account: An instance of the Account class to manage balances and positions.
+        """
+        super().__init__(data_paths, symbols, account)
+        """ Init SNR signals df with t0/t1 : entry/exit signals and side column """
+        self.signals_df = pd.read_csv(signal_path)
+        self.signals_df['t0'] = pd.to_datetime(self.signals_df['t0'])
+        self.signals_df['t1'] = pd.to_datetime(self.signals_df['t1'])
+        
+        self.signals_df['side'] = self.signals_df['side'].astype(int)
+        self.signals_df = self.signals_df[self.signals_df['side'] == 1]
+        # self.signals_df = self.signals_df[self.signals_df['t0'] > pd.to_datetime("2025-04-30 18:00:00+08:00")]
+        # print(f"[Debug] {self.signals_df.head()}")
+        if 'pred_vote' in self.signals_df.columns:
+            self.signals_df['pred_vote'] = self.signals_df['pred_vote'].astype(int)
+
+        self.signals_df.reset_index(drop=True, inplace=True)
+        self.signals = {}
+
+
+    def next(self):
+        idx = self.ds.get_current_index()
+        
+        for symbol in self.symbols:
+            
+            current_price = self.future.current_data[symbol]['Close']
+            current_time = pd.to_datetime(self.ds.original_datas[symbol].iloc[idx]['Datetime'])
+
+
+            if self.signals_df['t0'].isin([current_time]).any():
+                # print(f"[Debug] Entry signal for {symbol} at {current_time}")
+                # 根據 signal 下單 side = 1 多單 side = -1 空單
+                signal_row = self.signals_df[self.signals_df['t0'] == current_time].iloc[0]
+                side = signal_row['side']
+
+                if 'pred_vote' in signal_row and signal_row['pred_vote'] != 1:
+                    continue
+                # 下單: 計算 leverage 後下單
+                # 預期 tp/sl 是 3.6倍 的 signal volatility
+                # 預期收益是 10% 的 position size(default 1000)
+                # leverage = (0.1 * 1000) / (3.6 * signal_row['volatility'])
+                pt = float(signal_row['pt'])
+                sl = float(signal_row['sl'])
+
+                position_size = 1000
+                leverage = side * 0.1 / ((pt-current_price)/current_price)
+                leverage = int(max(1, min(leverage, 50)))  # 限制在 1 到 50 倍之間
+                # print(f"[Debug] {symbol} leverage: {leverage}")
+
+                self.future.create_order(symbol, side, position_size, leverage=leverage, take_profit=pt, stop_loss=sl)
+            # else:
+            #     print(f"[Debug] No entry signal for {symbol} at {current_time}")
+
+
+class macd_backtest_future(backtest_future_base):
+    def __init__(self, data_paths: list, symbols: list, account: Account):
+        """
+        Augments:
+        - data_paths: List of file paths to the market data CSVs.
+            - each csv must contain at least ['Timestamp','Open','High','Low','Close','Volume'] columns (Upper / Lower case are all allowed).
+        - symbols: List of trading symbols corresponding to the data paths.
+        - account: An instance of the Account class to manage balances and positions.
+        """
+        super().__init__(data_paths, symbols, account)
         """ Init MACD Cross Strategy """
         self.config = config(STRATEGY_CONFIG).load_config()[STRATEGY_NAME]
         self.limit = self.config['limit']
@@ -156,60 +274,43 @@ class backtest_future:
         self.atr_trailing_stop()
         self.atr_trailing_take_profit()
 
-    def run(self):
-        self.ds.reset()
-        print(f"Init: {self.ds.get_current_index()} and {self.ds.is_finished()}")
-        
-        for i in range(self.ds.get_total_rows()):
-            
-            self.next()
-            self.ds.run()
-        total_future_balance = self.account.future_balance
-        
-        
-        if not self.future.positions.empty:
-            print(f"持有倉位:\n{self.future.positions}")
-            for _,pos in self.future.positions.iterrows():
-                if "unrealized_pnl" in pos.index:
-                    total_future_balance+=float(pos['unrealized_pnl'])
-                total_future_balance+=float(pos.get('margin'))
-            self.future.positions.to_csv("future_positions.csv")  #原為 future_postions.csv
-        else:
-            print("Not holding position")
-        
-        if not self.future.history_positions.empty:
-            print(f"歷史交易紀錄:\n{self.future.history_positions}")
-            self.future.history_positions.to_csv("history.csv")
-        else:
-            print("Not any trading")
-        print(f"Backtest Down, remain: {total_future_balance}")
-        evolution = self.future.evolution()
-        for symbol, indicators in evolution.items():
-            print(f"標的資產: {symbol}")
-            for indicator, value in indicators.items():
-                print(f"{indicator}: {value}")
+
 
   
             
 
 if __name__ == '__main__':
-        # symbols = ["BTCUSDT"]  # 交易對
+    # symbols = ["BTCUSDT"]  # 交易對
 
     # timeframe = '1d'     # 時間週期
     # since = int(datetime(2025, 1, 1).timestamp() * 1000)  # 起始時間（yyyy-mm-dd）
 
     # # 獲取完整資料
     # data = fetch_all_ohlcv(symbols, timeframe, since)
-    symbol = ["BTCUSDT","ETHUSDT"]
-    timeframe = '4h'
-    since = int(datetime(2024, 1, 1).timestamp() * 1000)  # 起始時間（yyyy-mm-dd）
-    data_path = fetch_all_ohlcv(symbol,timeframe,since)
-    start = datetime.now()
-    account = Account("test")
-    account.set_spot_balance(10000)
-    #account.set_future_balance(1000000)
-    bt = backtest_spot(data_path,symbol,account)
+    # symbol = ["BTCUSDT"]
+    # timeframe = '15m'
+    # since = int(datetime(2024, 1, 1).timestamp() * 1000)  # 起始時間（yyyy-mm-dd）
+    # data_path = fetch_all_ohlcv(symbol,timeframe,since)
+    
+    # start = datetime.now()
+    # account = Account("test")
+    # account.set_spot_balance(10000)
+    # #account.set_future_balance(1000000)
+    # bt = backtest_spot(data_path,symbol,account)
+    # # bt.run()
+    # #bt = backtest_future(data_path,symbol,account)
     # bt.run()
-    #bt = backtest_future(data_path,symbol,account)
+    # print(f"RUN TIME:{datetime.now()-start}")
+
+    """SNR Backtest Future"""
+    symbols = ["BTCUSDT"]  # 交易對
+
+    account = Account("test")
+    account.set_future_balance(1000000)
+    bt = SNR_backtest_future(
+        data_paths=["./data/binanceusdm_swap_BTC-USDT-USDT_1h.csv"],
+        symbols=symbols, 
+        account=account,
+        signal_path="./data/BTC-USDT_1h_ewma_up3_dn3_lookback36_label.csv"
+    )
     bt.run()
-    print(f"RUN TIME:{datetime.now()-start}")
