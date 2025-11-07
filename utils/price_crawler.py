@@ -16,7 +16,11 @@ def fetch_all_ohlcv( symbols:list, timeframe:str, since:int, limit=1000)->list:
     return: list, paths of the  crawled data
     """
     data_paths=[]
-    exchange = ccxt.binance()
+    exchange = ccxt.binance({
+        'options': {
+            'defaultType': 'future',  # 使用永續合約市場
+        }
+    })
     for symbol in symbols:
         all_data = []  # 用於存儲所有資料
         current_since = since  # 當前請求的起始時間

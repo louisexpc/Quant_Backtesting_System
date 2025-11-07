@@ -11,6 +11,7 @@ from utils.spot import Spot
 from utils.future import Future
 from utils.data import DataSingleton
 from utils.indicator import ATR
+from pathlib import Path
 
 STRATEGY_CONFIG = r".\strategy\macd_cross.json"
 STRATEGY_NAME = "macd_cross"
@@ -69,6 +70,7 @@ class backtest_spot(object):
         if not self.spot.trade_history.empty:
             total_pnl = self.spot.trade_history['notional'].sum()
             print(f"總盈虧: {total_pnl}")
+        return self.spot.trade_history
 
 class backtest_future_base(object):
     def __init__(self, data_paths: list, symbols: list, account: Account):
@@ -93,7 +95,7 @@ class backtest_future_base(object):
             pass
 
 
-    def run(self):
+    def run(self)->pd.DataFrame:
         self.ds.reset()
         print(f"Init: {self.ds.get_current_index()} and {self.ds.is_finished()}")
         
@@ -125,15 +127,17 @@ class backtest_future_base(object):
             print(f"標的資產: {symbol}")
             for indicator, value in indicators.items():
                 print(f"{indicator}: {value}")
-
+        return self.future.history_positions if not self.future.history_positions.empty else pd.DataFrame()
 class SNR_backtest_future(backtest_future_base):
-    def __init__(self, data_paths: list, symbols: list, account: Account, signal_path:str):
+    def __init__(self, data_paths: list, symbols: list, account: Account, signal_path:str, mode:str = "both"):
         """
         Augments:
         - data_paths: List of file paths to the market data CSVs.
             - each csv must contain at least ['Timestamp','Open','High','Low','Close','Volume'] columns (Upper / Lower case are all allowed).
         - symbols: List of trading symbols corresponding to the data paths.
         - account: An instance of the Account class to manage balances and positions.
+        - signal_path: Path to the CSV file containing SNR signals with t0, t1, side, pt, sl columns.
+        - mode: "long", "short", or "both" to filter signals by side
         """
         super().__init__(data_paths, symbols, account)
         """ Init SNR signals df with t0/t1 : entry/exit signals and side column """
@@ -142,13 +146,24 @@ class SNR_backtest_future(backtest_future_base):
         self.signals_df['t1'] = pd.to_datetime(self.signals_df['t1'])
         
         self.signals_df['side'] = self.signals_df['side'].astype(int)
-        self.signals_df = self.signals_df[self.signals_df['side'] == 1]
+        if mode == "long":
+            self.signals_df = self.signals_df[self.signals_df['side'] == 1]
+        elif mode == "short":
+            self.signals_df = self.signals_df[self.signals_df['side'] == -1]
+        elif mode == "both":
+            pass
+        else:
+            raise ValueError("mode must be 'long', 'short' or 'both'")
+        # self.signals_df = self.signals_df[self.signals_df['side'] == 1]
         # self.signals_df = self.signals_df[self.signals_df['t0'] > pd.to_datetime("2025-04-30 18:00:00+08:00")]
         # print(f"[Debug] {self.signals_df.head()}")
+        # print(f"[Debug] Null in pred_vote: {self.signals_df['pred_vote'].isnull().sum()}")
         if 'pred_vote' in self.signals_df.columns:
             self.signals_df['pred_vote'] = self.signals_df['pred_vote'].astype(int)
 
         self.signals_df.reset_index(drop=True, inplace=True)
+        # print(f"[Debug] Loaded {len(self.signals_df)} signals from {signal_path}")
+        # print(f"[Debug] Filtered Signals: {len(self.signals_df[self.signals_df['pred_vote']==1])} signals")
         self.signals = {}
 
 
@@ -160,28 +175,33 @@ class SNR_backtest_future(backtest_future_base):
             current_price = self.future.current_data[symbol]['Close']
             current_time = pd.to_datetime(self.ds.original_datas[symbol].iloc[idx]['Datetime'])
 
-
+            # print(f"[Debug] {current_time}")
             if self.signals_df['t0'].isin([current_time]).any():
-                # print(f"[Debug] Entry signal for {symbol} at {current_time}")
-                # 根據 signal 下單 side = 1 多單 side = -1 空單
-                signal_row = self.signals_df[self.signals_df['t0'] == current_time].iloc[0]
-                side = signal_row['side']
 
-                if 'pred_vote' in signal_row and signal_row['pred_vote'] != 1:
-                    continue
-                # 下單: 計算 leverage 後下單
-                # 預期 tp/sl 是 3.6倍 的 signal volatility
-                # 預期收益是 10% 的 position size(default 1000)
-                # leverage = (0.1 * 1000) / (3.6 * signal_row['volatility'])
-                pt = float(signal_row['pt'])
-                sl = float(signal_row['sl'])
+                # assert len(self.signals_df[self.signals_df['t0'] == current_time]) == 1, \
+                #     f"Multiple signals found for {symbol} at {current_time}"
+                for _, signal_row in self.signals_df[self.signals_df['t0'] == current_time].iterrows():
+                    # print(f"[Debug] Signal Row: t0={signal_row.t0}, side={signal_row.side}, pt={signal_row.pt}, sl={signal_row.sl}, pred_vote={getattr(signal_row, 'pred_vote', 'N/A')}")
+                    # 根據 signal 下單 side = 1 多單 side = -1 空單
+                    # signal_row = self.signals_df[self.signals_df['t0'] == current_time].iloc[0]
+                    side = signal_row['side']
 
-                position_size = 1000
-                leverage = side * 0.1 / ((pt-current_price)/current_price)
-                leverage = int(max(1, min(leverage, 50)))  # 限制在 1 到 50 倍之間
-                # print(f"[Debug] {symbol} leverage: {leverage}")
+                    if 'pred_vote' in signal_row and signal_row['pred_vote'] != 1:
+                        continue
+                    # print(f"[Debug] Entry signal for {symbol} at {current_time}")
+                    # 下單: 計算 leverage 後下單
+                    # 預期 tp/sl 是 3.6倍 的 signal volatility
+                    # 預期收益是 10% 的 position size(default 1000)
+                    # leverage = (0.1 * 1000) / (3.6 * signal_row['volatility'])
+                    pt = float(signal_row['pt'])
+                    sl = float(signal_row['sl'])
 
-                self.future.create_order(symbol, side, position_size, leverage=leverage, take_profit=pt, stop_loss=sl)
+                    position_size = 1000
+                    leverage = side * 0.1 / ((pt-current_price)/current_price)
+                    leverage = int(max(1, min(leverage, 50)))  # 限制在 1 到 50 倍之間
+                    # print(f"[Debug] {symbol} leverage: {leverage}")
+
+                    self.future.create_order(symbol, side, position_size, leverage=leverage, take_profit=pt, stop_loss=sl)
             # else:
             #     print(f"[Debug] No entry signal for {symbol} at {current_time}")
 
@@ -301,16 +321,66 @@ if __name__ == '__main__':
     # #bt = backtest_future(data_path,symbol,account)
     # bt.run()
     # print(f"RUN TIME:{datetime.now()-start}")
-
+    """data 清洗"""
+    # long_df = pd.read_csv("./data/tbm_with_pred_long.csv", parse_dates=['t0', 't1'])
+    # long_df = long_df[(long_df['t0'] >= pd.to_datetime("2025-04-30 00:00:00+08:00")) & (long_df['side']==1) & (long_df['pred_vote']==1)]
+    # long_df.to_csv("./data/tbm_with_pred_long_filtered.csv", index=False)
     """SNR Backtest Future"""
     symbols = ["BTCUSDT"]  # 交易對
+    signals_dir = "data/best_win_rate"
+    signals = {
+        "36":{
+            "origin" : f"{signals_dir}/BTC-USDT_1h_atr_up4_dn4_lookback36_label.csv",
+            "rf" : {
+                "long" : f"{signals_dir}/long_36_rf.csv",
+                "short": f"{signals_dir}/short_36_rf.csv"
+            }
+        },
+        "72":{
+            "origin" : f"{signals_dir}/BTC-USDT_1h_atr_up6_dn6_lookback72_label.csv",
+            "rf" : {
+                "long" : f"{signals_dir}/long_72_rf.csv",
+                "short": f"{signals_dir}/short_72_rf.csv"
+            }
+        },
+        "108":{
+            "origin" : f"{signals_dir}/BTC-USDT_1h_ewma_up8_dn8_lookback108_label.csv",
+            "rf" : {
+                "long" : f"{signals_dir}/long_108_rf.csv",
+                "short": f"{signals_dir}/short_108_rf.csv"
+            }
+        }
+    }
+    for key, value in signals.items():
+        # 回測分析:
+        # origin (only long) v.s rf long
+        # origin (only short) v.s. rf short
 
-    account = Account("test")
-    account.set_future_balance(1000000)
-    bt = SNR_backtest_future(
-        data_paths=["./data/binanceusdm_swap_BTC-USDT-USDT_1h.csv"],
-        symbols=symbols, 
-        account=account,
-        signal_path="./data/BTC-USDT_1h_ewma_up3_dn3_lookback36_label.csv"
-    )
-    bt.run()
+        print(f"=====Backtest SNR Future with origin signals lookback {key}=====")
+        for mode in ["long", "short"]:
+            print(f"-----Mode: {mode}-----")
+            account = Account("test")
+            account.set_future_balance(1000000)
+            bt = SNR_backtest_future(
+                data_paths=["./data/binanceusdm_swap_BTC-USDT-USDT_1h.csv"],
+                symbols=symbols, 
+                account=account,
+                signal_path=value["origin"],
+                mode=mode
+            )
+            origin_history_df = bt.run()
+            origin_history_df.to_csv(Path(signals_dir) / f"snr_origin_lookback{key}_{mode}_history.csv", index=False)
+        print(f"=====Backtest SNR Future with RF predicted signals lookback {key}=====")
+        for mode in ["long", "short"]:
+            print(f"-----Mode: {mode}-----")
+            account = Account("test")
+            account.set_future_balance(1000000)
+            bt = SNR_backtest_future(
+                data_paths=["./data/binanceusdm_swap_BTC-USDT-USDT_1h.csv"],
+                symbols=symbols, 
+                account=account,
+                signal_path=value["rf"][mode],
+                mode=mode
+            )
+            rf_history_df = bt.run()
+            rf_history_df.to_csv(Path(signals_dir) / f"snr_rf_lookback{key}_{mode}_history.csv", index=False)
